@@ -1,4 +1,5 @@
 import socket
+import sys
 import threading
 import argparse
 
@@ -7,12 +8,16 @@ parser.add_argument("--name", help="Initial buffer to send")
 args = parser.parse_args()
 
 try:
-    name = args.name + "> "
-except TypeError:
-    name = "> "
+    name = args.name
+except Exception:
+    print("Please provide a name using --name")
+    sys.exit(0)
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect(("localhost", 5000))
+s.send(name.encode("UTF-8"))
+
+name = args.name + "> "
 
 def client_sender():
     """
@@ -25,6 +30,7 @@ def client_sender():
         if cmd == "":
             continue
         elif cmd == "exit":
+            s.send(cmd.encode("UTF-8"))
             break
         cmd = name + cmd
 
