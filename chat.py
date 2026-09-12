@@ -15,12 +15,14 @@ def client_listener(client):
             if not data:
                 print("Client disconnected")
                 clients.remove(client)
+                client.close()
                 break
 
             data = data.decode("UTF-8", errors="ignore")
 
             if data == "exit":
                 clients.remove(client)
+                client.close()
                 break
 
             print(data)
@@ -32,6 +34,11 @@ def client_listener(client):
 
         except Exception as e:
             print(f"ERROR: {e}")
+
+            if client in clients:
+                clients.remove(client)
+
+            client.close()
             break
 
 s.listen(5)
