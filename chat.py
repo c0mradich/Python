@@ -1,6 +1,6 @@
 import threading
 import socket
-import subprocess
+import os
 
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -8,21 +8,127 @@ s.bind(("localhost", 5000))
 
 clients = {}
 
+def file_sender(client, filename):
+    try:
+        file_size = os.path.getsize(filename)
+        basename = os.path.basename(filename)
+
+        header = f"FILE_TRANSFER {basename} {file_size}\n"
+        client.sendall(header.encode("UTF-8"))
+
+        with open(filename, "rb") as f:
+            while True:
+                chunk = f.read(4096)
+
+                if not chunk:
+                    break
+
+                client.sendall(chunk)
+
+    except FileNotFoundError:
+        client.sendall(b"FILE_ERROR File not found\n")
+
+def receive_file(client, first_data, filename, file_size):
+    received = 0
+
+    with open(filename, "wb") as f:
+        file_data = first_data[:file_size]
+
+        f.write(file_data)
+        received += len(file_data)
+
+        while received < file_size:
+            chunk = client.recv(min(4096, file_size - received))
+
+            if not chunk:
+                raise ConnectionError(
+                    "Client disconnected during file transfer"
+                )
+
+            f.write(chunk)
+            received += len(chunk)
+
+    return received
+
+
+def receive_cmd_output(client, val):
+    buffer = val.encode("UTF-8")
+    print("BUFFER: ", buffer)
+    if b"CMD_OUTPUT_END\n" not in buffer:
+        while b"CMD_OUTPUT_END\n" not in buffer:
+            chunk = client.recv(1024)
+            print("CHUNK: ", chunk)
+            if not chunk:
+                raise ConnectionError("Client disconnected during CMD_OUTPUT")
+
+            buffer += chunk
+    return buffer.decode("UTF-8", errors="ignore")
+
 def client_listener(client, username):
     while True:
         try:
 
             data = client.recv(1024)
-
+            buffer = data
             if not data:
                 print("Client disconnected")
                 del clients[username]
                 client.close()
                 break
 
+            elif b"FILE_TRANSFER " in buffer:
+                header_end = buffer.find(b"\n")
+
+                if header_end == -1:
+                    print("Incomplete FILE_TRANSFER header")
+                    continue
+
+                header = buffer[:header_end]
+                first_file_data = buffer[header_end + 1:]
+
+                parts = header.decode("UTF-8").split(" ", 4)
+
+                if len(parts) != 5:
+                    print("Invalid FILE_TRANSFER header:", header)
+                    continue
+
+                filename = parts[1]
+                priorityname = parts[3]
+                file_size = int(parts[4])
+
+                print(
+                    "FILE_TRANSFER DETECTED:",
+                    filename,
+                    "FROM:",
+                    priorityname,
+                    "SIZE:",
+                    file_size
+                )
+
+                target = clients.get(priorityname)
+
+                if not target:
+                    print(f"Client {priorityname} not found.")
+                    continue
+
+                print(f"Receiving {filename} from {username}")
+
+                receive_file(
+                    client,
+                    first_file_data,
+                    filename,
+                    file_size
+                )
+
+                print(f"Sending {filename} to {priorityname}")
+
+                file_sender(target, filename)
+
+                continue
+
             data = data.decode("UTF-8", errors="ignore")
 
-            # DYBUG: print(data)
+            print(data)
             if data == "exit\n":
                 del clients[username]
                 client.close()
@@ -33,20 +139,19 @@ def client_listener(client, username):
             #print (f"Received from {username}: {datavalue}")
 
             if datavalue.startswith("CMD_OUTPUT"):
-
-                priority = datavalue.split(" ")[1]
-                #print(f"Priority: {priority}")
-
+                print("I'm Here!!!")
+                data = receive_cmd_output(client, data)
+                priority = data.split(" ")[1]
                 output = " ".join(data.split(" ")[3:])
-                #print(f"Output: {output}")
-                #print("DATA: ", data)
-
                 prioritySocket = clients.get(priority)
+
                 if prioritySocket:
                     try:
-                        #print("SENDING: ", f"{username}> {output}\n")
-                        prioritySocket.send(f"{username}> {output}\n".encode("UTF-8"))
+                        prioritySocket.send(
+                            f"{username}> {output}\n".encode("UTF-8")
+                        )
                         continue
+
                     except Exception as e:
                         print(f"Failed to send output to {priority}: {e}")
 
@@ -81,11 +186,29 @@ def client_listener(client, username):
                     print(f"Client {captivename} not found.")
                     client.send(f"Client {captivename} not found.\n".encode("UTF-8"))
 
+            elif datavalue.startswith("get"):
+                filename = datavalue.split("get ")[1].strip()
+                captivename = data.split(" ")[2].strip()
+                captive = clients.get(captivename)
+                if filename == "":
+                    print("No filename provided to get.")
+                    client.send(f"No filename provided to get.\n".encode("UTF-8"))
+                    continue
+
+                #print(f"Sending file {filename} to {username}")
+                if captive:
+                    try:
+                        captive.send(f"{username} -get {filename}\n".encode("UTF-8"))
+                        continue
+                    except Exception as e:
+                        print(f"Failed to send get request to {captivename}: {e}")
+                continue
+            
             else:
                 data = data.encode("UTF-8")
                 for connected_client in clients.values():
-                    #print("Sending to:", connected_client)
-                    connected_client.sendall(data + b"\n")
+                    print("Sending to:", connected_client, "DATA: ", data.decode("UTF-8", errors="ignore"))
+                    connected_client.sendall(data)
 
         except Exception as e:
             print(f"ERROR: {e}")

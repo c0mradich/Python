@@ -3,6 +3,7 @@ import sys
 import threading
 import argparse
 import subprocess
+import os
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--name", help="Initial buffer to send")
@@ -40,6 +41,50 @@ def execute_command(command):
 
     return output
 
+def transfer_file(priorityname, file_path):
+    print("SENDING_FILE: ")
+    if not os.path.isfile(file_path):
+        print(f"File {file_path} does not exist.")
+        return
+
+    file_size = os.path.getsize(file_path)
+    filename = os.path.basename(file_path)
+
+    header = f"FILE_TRANSFER {filename} to {priorityname} {file_size}\n"
+    s.sendall(header.encode("UTF-8"))
+
+    with open(file_path, "rb") as f:
+        print("SENDING_FILE: ", file_path, "SIZE: ", file_size)
+        while True:
+            chunk = f.read(4096)
+
+            if not chunk:
+                break
+
+            s.sendall(chunk)
+
+def receive_file(client, first_data, filename, file_size):
+    received = 0
+
+    with open(filename, "wb") as f:
+        file_data = first_data[:file_size]
+
+        f.write(file_data)
+        received += len(file_data)
+
+        while received < file_size:
+            chunk = client.recv(min(4096, file_size - received))
+
+            if not chunk:
+                raise ConnectionError(
+                    "Client disconnected during file transfer"
+                )
+
+            f.write(chunk)
+            received += len(chunk)
+
+    return received
+
 def client_sender():
     """
     Подключается к серверу и позволяет
@@ -58,22 +103,68 @@ def client_sender():
 
         s.send(cmd.encode("UTF-8"))
 
+def receive_cmd_output(client, val):
+    buffer = val.encode("UTF-8")
+    print("BUFFER: ", buffer)
+    if b"CMD_OUTPUT_END\n" not in buffer:
+        while b"CMD_OUTPUT_END\n" not in buffer:
+            chunk = client.recv(1024)
+            print("CHUNK: ", chunk)
+            if not chunk:
+                raise ConnectionError("Client disconnected during CMD_OUTPUT")
+
+            buffer += chunk
+    return buffer.decode("UTF-8", errors="ignore")
+
+
 def client_listener():
     while True:
         try:
-            while True:
-                data = s.recv(1024)
-                if not data:
-                    break
-                elif data.endswith(b"\n"):
-                    break
-
-            if not data:
+            buffer = s.recv(1024)
+            data = buffer.decode("UTF-8", errors="ignore")
+            if not buffer:
                 break
+            if b"CMD_OUTPUT" in buffer:
+                print("CMD OUTPUT DETECTED")
+                data = receive_cmd_output(s, data)
 
-            #print(f"\n[RECEIVED] {data}\n")
+                print(data, end="")
 
-            data = data.decode("UTF-8", errors="ignore")
+            elif b"FILE_TRANSFER " in buffer:
+                header_end = buffer.find(b"\n")
+
+                if header_end == -1:
+                    print("Incomplete FILE_TRANSFER header")
+                    continue
+
+                header = buffer[:header_end]
+                first_file_data = buffer[header_end + 1:]
+
+                parts = header.decode("UTF-8").split(" ", 2)
+
+                if len(parts) != 3:
+                    print("Invalid FILE_TRANSFER header:", header)
+                    continue
+
+                filename = parts[1]
+                file_size = int(parts[2])
+
+                print(
+                    "FILE_TRANSFER DETECTED:",
+                    filename,
+                    "SIZE:",
+                    file_size
+                )
+
+                receive_file(
+                    s,
+                    first_file_data,
+                    filename,
+                    file_size
+                )
+
+                continue
+
             #print("OPTION: " + data.split(" ")[1])
             if data.split(" ")[1] == "-run":                
                 priorityname = data.split(" ")[0]
@@ -82,8 +173,31 @@ def client_listener():
                 #print(f"Executing command from {priorityname}: {command}")
 
                 output = execute_command(command)
-                s.sendall((name + "CMD_OUTPUT " + priorityname + " " + output.decode("UTF-8", errors="ignore")+"\n").encode("UTF-8"))
+
+                message = (
+                    name
+                    + "CMD_OUTPUT "
+                    + priorityname
+                    + " "
+                    + output.decode("UTF-8", errors="ignore")
+                    + "CMD_OUTPUT_END\n"
+                )
+
+                s.sendall(message.encode("UTF-8"))
                 continue
+            elif data.split(" ")[1] == "-get":
+                print("DATASUKA: ", data)
+                priorityname = data.split(" ")[0]
+                filenameWithname = data.split(priorityname + " -get ")[1].strip()
+                filename= filenameWithname.split(" ")[1]
+
+                #print(f"Receiving file {filename} from {priorityname}")
+                file_path = os.path.join(os.getcwd(), filename)
+                print("FILE_PATH: ", file_path, "FULENAME: ", filename)
+                transfer_file(priorityname, file_path)
+                print(f"Sent file {filename} to {priorityname}")
+                continue
+                
 
             dataname = data.split(">")[0].strip()
             #print(f"Received from DATANAME: {dataname}")
