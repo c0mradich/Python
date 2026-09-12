@@ -46,6 +46,11 @@ s.listen(5)
 while True:
     client, addr = s.accept()
     username = client.recv(1024).decode("UTF-8", errors="ignore")  # Receive initial data from the client (e.g., username)
+    if username in clients:
+        client.send("Username already taken. Disconnecting.".encode("UTF-8"))
+        client.close()
+        continue
+    
     clients[username] = client
 
     print(f"Connection from {addr} has been established!")
