@@ -42,7 +42,7 @@ def execute_command(command):
     return output
 
 def transfer_file(priorityname, file_path):
-    print("SENDING_FILE: ")
+    #print("SENDING_FILE: ")
     if not os.path.isfile(file_path):
         print(f"File {file_path} does not exist.")
         return
@@ -54,7 +54,7 @@ def transfer_file(priorityname, file_path):
     s.sendall(header.encode("UTF-8"))
 
     with open(file_path, "rb") as f:
-        print("SENDING_FILE: ", file_path, "SIZE: ", file_size)
+        #print("SENDING_FILE: ", file_path, "SIZE: ", file_size)
         while True:
             chunk = f.read(4096)
 
@@ -105,11 +105,11 @@ def client_sender():
 
 def receive_cmd_output(client, val):
     buffer = val.encode("UTF-8")
-    print("BUFFER: ", buffer)
+
     if b"CMD_OUTPUT_END\n" not in buffer:
         while b"CMD_OUTPUT_END\n" not in buffer:
             chunk = client.recv(1024)
-            print("CHUNK: ", chunk)
+            #print("CHUNK: ", chunk)
             if not chunk:
                 raise ConnectionError("Client disconnected during CMD_OUTPUT")
 
@@ -125,10 +125,11 @@ def client_listener():
             if not buffer:
                 break
             if b"CMD_OUTPUT" in buffer:
-                print("CMD OUTPUT DETECTED")
+                #print("CMD OUTPUT DETECTED")
                 data = receive_cmd_output(s, data)
 
                 print(data, end="")
+                continue
 
             elif b"FILE_TRANSFER " in buffer:
                 header_end = buffer.find(b"\n")
@@ -149,12 +150,7 @@ def client_listener():
                 filename = parts[1]
                 file_size = int(parts[2])
 
-                print(
-                    "FILE_TRANSFER DETECTED:",
-                    filename,
-                    "SIZE:",
-                    file_size
-                )
+                #print("FILE_TRANSFER DETECTED:",filename,"SIZE:",file_size)
 
                 receive_file(
                     s,
@@ -183,19 +179,20 @@ def client_listener():
                     + "CMD_OUTPUT_END\n"
                 )
 
-                s.sendall(message.encode("UTF-8"))
+                s.send(message.encode("UTF-8"))
                 continue
+
             elif data.split(" ")[1] == "-get":
-                print("DATASUKA: ", data)
+                #print("DATASUKA: ", data)
                 priorityname = data.split(" ")[0]
                 filenameWithname = data.split(priorityname + " -get ")[1].strip()
                 filename= filenameWithname.split(" ")[1]
 
                 #print(f"Receiving file {filename} from {priorityname}")
                 file_path = os.path.join(os.getcwd(), filename)
-                print("FILE_PATH: ", file_path, "FULENAME: ", filename)
+                #print("FILE_PATH: ", file_path, "FULENAME: ", filename)
                 transfer_file(priorityname, file_path)
-                print(f"Sent file {filename} to {priorityname}")
+                #print(f"Sent file {filename} to {priorityname}")
                 continue
                 
 
