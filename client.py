@@ -88,10 +88,6 @@ def receive_file(client, first_data, filename, file_size):
     return received
 
 def client_sender():
-    """
-    Подключается к серверу и позволяет
-    пользователю отправлять команды.
-    """
 
     while True:
         cmd = input(name)
@@ -101,6 +97,25 @@ def client_sender():
             cmd = cmd + "\n"
             s.send(cmd.encode("UTF-8"))
             break
+        
+        elif cmd.startswith("dataPush"):
+            parts = cmd.split()
+
+            if len(parts) < 3:
+                print("Usage: dataPush <target> <filename>")
+                continue
+
+            op = parts[1]
+            filename = parts[2]
+
+            file_path = os.path.join(os.getcwd(), filename)
+
+            if not os.path.isfile(file_path):
+                print(f"File not found: {file_path}")
+                continue
+
+            transfer_file(op, file_path)
+            continue
         cmd = name + cmd + "\n"
 
         s.send(cmd.encode("UTF-8"))
