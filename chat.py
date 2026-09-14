@@ -2,6 +2,25 @@ import threading
 import socket
 import os
 
+startText = """ 
+ ███████╗██╗   ██╗ ██╗███╗   ██╗
+ ██╔════╝██║   ██║███║████╗  ██║
+ ███████╗██║   ██║╚██║██╔██╗ ██║
+ ╚════██║╚██╗ ██╔╝ ██║██║╚██╗██║
+ ███████║ ╚████╔╝  ██║██║ ╚████║
+ ╚══════╝  ╚═══╝   ╚═╝╚═╝  ╚═══╝
+
+             S V 1 N   N E T C H A T
+             ───────────────────────
+             TCP NETWORK CHAT
+             v1.0.0
+
+ [*] Initializing network subsystem...
+ [*] Loading protocol...
+ [*] Ready.
+"""
+
+print(startText)
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.bind(("localhost", 5000))
