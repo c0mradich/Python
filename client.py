@@ -208,8 +208,8 @@ def client_listener():
                 continue
             
             elif data.split(" ")[1] == "-screenshot":
-
-                priority_name = data.split(" ")[0]
+                print("getData: ", data)
+                priority_name = data.split("")[1]
 
                 screenshot_path = os.path.join(
                     os.getcwd(),
