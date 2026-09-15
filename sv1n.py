@@ -19,7 +19,7 @@ startText = """
              S V 1 N   N E T C H A T
              ───────────────────────
              TCP NETWORK CHAT
-             v1.0.1
+             v1.0.2
 
  [*] Initializing network subsystem...
  [*] Loading protocol...
@@ -70,6 +70,7 @@ def client_listener(client, username):
 
         elif data == b"exit\n":
             del clients[username]
+            print(Fore.CYAN + "\n[ALERT] Connection closed on socket "+username+"\n"+Style.RESET_ALL)
             client.close()
             break
             
@@ -300,42 +301,37 @@ def receive_file(client, first_data, filename, file_size):
     return received
 
 def client_sender(name):
-    try:
-        while True:
-            if not forbid_sending:
-                cmd = input(name)
-                if cmd == "":
-                    continue
-                elif cmd == "exit":
-                    cmd = cmd + "\n"
-                    s.send(cmd.encode("UTF-8"))
-                    break
-
-                elif cmd.startswith("dataPush"):
-                    parts = cmd.split()
-
-                    if len(parts) < 3:
-                        print("Usage: dataPush <target> <filename>")
-                        continue
-
-                    op = parts[1]
-                    filename = parts[2]
-
-                    file_path = os.path.join(os.getcwd(), filename)
-
-                    if not os.path.isfile(file_path):
-                        print(f"File not found: {file_path}")
-                        continue
-
-                    transfer_file(op, file_path)
-                    continue
-
-                cmd = name + cmd + "\n"
+    while True:
+        if not forbid_sending:
+            cmd = input(name)
+            if cmd == "":
+                continue
+            elif cmd == "exit":
+                cmd = cmd + "\n"
                 s.send(cmd.encode("UTF-8"))
-    except KeyboardInterrupt as e:
-        print(Fore.GREEN + "\n\nProgramm successfully stopped" + Style.RESET_ALL)
-        s.send(b"exit\n")
-        sys.exit(0)
+                break
+
+            elif cmd.startswith("dataPush"):
+                parts = cmd.split()
+
+                if len(parts) < 3:
+                    print("Usage: dataPush <target> <filename>")
+                    continue
+
+                op = parts[1]
+                filename = parts[2]
+
+                file_path = os.path.join(os.getcwd(), filename)
+
+                if not os.path.isfile(file_path):
+                    print(f"File not found: {file_path}")
+                    continue
+
+                transfer_file(op, file_path)
+                continue
+
+            cmd = name + cmd + "\n"
+            s.send(cmd.encode("UTF-8"))
 
 def receive_cmd_output(client, val):
     buffer = val.encode("UTF-8")
@@ -530,29 +526,24 @@ if args.listen == True:
     print(Fore.BLUE + f"[MESSAGE] Server successfully started on {target} on port {port}\n" + Style.RESET_ALL)
 
     while True:
-        try:
-            client, addr = s.accept()
-            username = client.recv(1024).decode("UTF-8", errors="ignore")  # Receive initial data from the client (e.g., username)
-            if username in clients:
-                client.send("Username already taken. Disconnecting.\n".encode("UTF-8"))
-                client.close()
-                continue
+        client, addr = s.accept()
+        username = client.recv(1024).decode("UTF-8", errors="ignore")  # Receive initial data from the client (e.g., username)
+        if username in clients:
+            client.send("Username already taken. Disconnecting.\n".encode("UTF-8"))
+            client.close()
+            continue
 
-            clients[username] = client
+        clients[username] = client
 
-            print(Fore.BLUE+f"[ALERT] Connection from {addr} has been established!"+Style.RESET_ALL)
+        print(Fore.BLUE+f"[ALERT] Connection from {addr} has been established!"+Style.RESET_ALL)
 
-            listener = threading.Thread(
-                target=client_listener,
-                args=(client, username),
-                daemon=True
-            )
+        listener = threading.Thread(
+            target=client_listener,
+            args=(client, username),
+            daemon=True
+        )
 
-            listener.start()
-        except KeyboardInterrupt as e:
-            print(Fore.GREEN + "\n\n[ALERT] Programm successfully stopped. "+ Style.RESET_ALL)
-            s.close()
-            sys.exit(0)
+        listener.start()
 
 else:
     if args.name == None or len(args.name)>20 or len(args.name)<4:
@@ -574,8 +565,31 @@ else:
     except Exception as e:
         print(e)
         sys.exit(0)
-    
-    thread = threading.Thread(target=ClientListener, args=(username,))
-    thread2 = threading.Thread(target=client_sender, args=(username,))
+
+try:
+    thread = threading.Thread(
+        target=ClientListener,
+        args=(username,),
+        daemon=True
+    )
+
+    thread2 = threading.Thread(
+        target=client_sender,
+        args=(username,),
+        daemon=True
+    )
+
     thread.start()
     thread2.start()
+
+    while True:
+        time.sleep(1)
+
+except KeyboardInterrupt:
+    print(Fore.GREEN+ "\n\nProgramm successfully stopped\n"+ Style.RESET_ALL)
+    try:
+        s.sendall(b"exit\n")
+    except OSError:
+        pass
+
+    s.close()
