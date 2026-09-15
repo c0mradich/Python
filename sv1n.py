@@ -29,6 +29,7 @@ startText = """
 def opDefiner(clients, data):
     op = data.split()[1].strip()
     opSocket = clients.get(op)
+    print("OP: ", op, " OPSOCKET: ", opSocket)
     return op, opSocket
 
 def file_sender(client, filename):
@@ -64,7 +65,6 @@ def client_listener(client, username):
     buffer = b""
     while True:
         data = client.recv(4096)
-
         if not data:
             break
 
@@ -206,11 +206,12 @@ def client_listener(client, username):
             elif buffer.startswith(b"get"):
                 try:
                     cmd = buffer.split(b"\n", 2)[0].decode().strip() 
-                    filename = cmd.split(" ")[3]
+                    filename = cmd.split(" ")[2]
                     captiveName, captive = opDefiner(clients, cmd)
                 except Exception as e:
                     print(e)
                     client.send("Please follow special command format!".encode("UTF-8"))
+                    print("Please follow special command format!")
                     buffer = buffer.split(b"\n", 2)[1]
                     continue
 
@@ -435,6 +436,8 @@ def ClientListener(name):
 
             elif data.split(" ")[1] == "-get":
 
+                print(Fore.GREEN + "DATA: " + data)
+
                 priorityname = data.split(" ")[0]
                 filename= data.split(" ")[2]
                 print("FILENAME:", repr(filename))
@@ -445,7 +448,7 @@ def ClientListener(name):
                 continue
 
             if not "> " in data:
-                print(Fore.RED + f"\n[ALERT] Received [ALERT] from server: {data}" + Style.RESET_ALL)
+                print(Fore.RED + f"\n [ALERT] from server: {data}" + Style.RESET_ALL)
                 continue
 
             else:
