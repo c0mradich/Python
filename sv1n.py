@@ -573,7 +573,8 @@ else:
         s.send(args.name.encode("UTF-8"))
     except Exception as e:
         print(e)
-
+        sys.exit(0)
+    
     thread = threading.Thread(target=ClientListener, args=(username,))
     thread2 = threading.Thread(target=client_sender, args=(username,))
     thread.start()
