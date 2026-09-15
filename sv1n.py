@@ -19,7 +19,7 @@ startText = """
              S V 1 N   N E T C H A T
              ───────────────────────
              TCP NETWORK CHAT
-             v1.0.0
+             v1.0.1
 
  [*] Initializing network subsystem...
  [*] Loading protocol...
