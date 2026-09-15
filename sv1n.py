@@ -301,9 +301,8 @@ def receive_file(client, first_data, filename, file_size):
 
 def client_sender(name):
     try:
-
         while True:
-            if forbid_sending == False:
+            if not forbid_sending:
                 cmd = input(name)
                 if cmd == "":
                     continue
@@ -335,7 +334,7 @@ def client_sender(name):
                 s.send(cmd.encode("UTF-8"))
     except KeyboardInterrupt as e:
         print(Fore.GREEN + "\n\nProgramm successfully stopped" + Style.RESET_ALL)
-        s.send(name + "exit\n".encode("UTF-8"))
+        s.send(b"exit\n")
         sys.exit(0)
 
 def receive_cmd_output(client, val):
