@@ -20,7 +20,7 @@ startText = """
              S V 1 N   N E T C H A T
              ───────────────────────
              TCP NETWORK CHAT
-             v1.0.3
+             v1.0.4
 
  [*] Initializing network subsystem...
  [*] Loading protocol...
@@ -66,22 +66,30 @@ def client_listener(client, username):
     buffer = b""
     while True:
         data = client.recv(4096)
+        
         if not data:
             break
 
-        elif data == b"exit\n":
-            del clients[username]
-            print(Fore.CYAN + "\n[ALERT] Connection closed on socket "+username+"\n"+Style.RESET_ALL)
-            client.close()
-            break
             
         buffer += data        
 
         while buffer != b"":
             nameSection = b"> " in buffer[0:30]
             if nameSection == False:
-                if buffer.startswith(b"FILE_TRANSFER"):
-                    try:
+                if buffer.startswith(b"exit\n"):
+                    clients.pop(username, None)
+                    print(Fore.CYAN + "\n[ALERT] Connection closed on socket "+username+"\n"+Style.RESET_ALL)
+                    client.close()
+                    return
+
+                elif buffer.startswith(b"FILE_TRANSFER"):
+                    try: 
+                        end = buffer.find(b"HEADER-END\n")
+                        if end == -1:
+                            data = client.recv(4096)
+                            buffer += data
+                            continue
+
                         vip = clients.get(buffer.split(b" ")[1].decode())
                         filename = buffer.split(b" ")[2].decode("UTF-8", errors="ignore")
                         file_size = int(buffer.split(b" ")[3])
@@ -95,12 +103,6 @@ def client_listener(client, username):
 
                         vip.sendall("SENDING_FORBIDDEN".encode("UTF-8"))
 
-                        end = buffer.find(b"HEADER-END\n")
-                        if end == -1:
-                            data = client.recv(4096)
-                            buffer += data
-                            continue
-
                         with open(filename, "wb") as f:
 
                             header = buffer[:end + len(b"HEADER-END\n")]
@@ -113,10 +115,15 @@ def client_listener(client, username):
 
                             while rest_of_file >= 4096:
                                 data = client.recv(4096)
+                                if data == b"":
+                                    raise ConnectionError("Client disconnected during file transfer")
+                                
                                 f.write(data)
                                 rest_of_file -= len(data)
                             if rest_of_file > 0:
                                 data = client.recv(rest_of_file)
+                                if data == b"":
+                                    raise ConnectionError("Client disconnected during file transfer")                                
                                 f.write(data)
 
                         file_sender(vip, os.path.join(os.getcwd(), filename), username)
@@ -124,7 +131,6 @@ def client_listener(client, username):
                         vip.sendall("SENDING ALLOWED".encode("UTF-8"))
                     except Exception as e:
                         print(e)
-                        continue
 
                     buffer = b""
                     continue
@@ -185,6 +191,7 @@ def client_listener(client, username):
                     
                     if  captive == "" or commandEx == "":
                         client.send(f"No command provided to run.\n".encode("UTF-8"))
+                        buffer = buffer.split(b"\n", 2)[1]
                         continue                
 
                     if captive:
@@ -231,6 +238,12 @@ def client_listener(client, username):
                         print(f"Failed to send get request to {captiveName}: {e}")
                         buffer = buffer.split(b"\n", 2)[1]
                     continue
+
+                client.send(f"No captive provided to get.\n".encode("UTF-8"))
+                buffer = buffer.split(b"\n", 2)[1]
+                continue
+
+            
             else:
                 cmd = msg.split(b"\n", 2)[0]
                 for connected_client in clients.values():
@@ -284,12 +297,12 @@ def receive_file(client, first_data, filename, file_size):
 def client_sender(name):
     while True:
         if not forbid_sending:
-            cmd = input(name)
+            cmd = input(name).strip()
             if cmd == "":
                 continue
             elif cmd == "exit":
                 cmd = cmd + "\n"
-                s.send(cmd.encode("UTF-8"))
+                s.sendall(cmd.encode("UTF-8"))
                 break
 
             elif cmd.startswith("dataPush"):
@@ -312,7 +325,7 @@ def client_sender(name):
                 continue
 
             cmd = name + cmd + "\n"
-            s.send(cmd.encode("UTF-8"))
+            s.sendall(cmd.encode("UTF-8"))
 
 def receive_cmd_output(client, val):
     buffer = val.encode("UTF-8")
@@ -401,7 +414,7 @@ def ClientListener(name):
                     + "CMD_OUTPUT_END\n"
                 )
 
-                s.send(message.encode("UTF-8"))
+                s.sendall(message.encode("UTF-8"))
                 continue
             
             elif data.split(" ")[1] == "-screenshot":
@@ -515,7 +528,7 @@ if args.listen == True:
         client, addr = s.accept()
         username = client.recv(1024).decode("UTF-8", errors="ignore")  # Receive initial data from the client (e.g., username)
         if username in clients:
-            client.send("Username already taken. Disconnecting.\n".encode("UTF-8"))
+            client.sendall("Username already taken. Disconnecting.\n".encode("UTF-8"))
             client.close()
             continue
 
@@ -547,7 +560,7 @@ else:
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((target, int(port)))
-        s.send(args.name.encode("UTF-8"))
+        s.sendall(args.name.encode("UTF-8"))
     except Exception as e:
         print(e)
         sys.exit(0)
