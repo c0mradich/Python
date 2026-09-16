@@ -4,6 +4,7 @@ import threading
 import argparse
 import subprocess
 import os
+import hashlib
 import time
 import pyautogui
 from colorama import Fore, Style, init
@@ -19,7 +20,7 @@ startText = """
              S V 1 N   N E T C H A T
              ───────────────────────
              TCP NETWORK CHAT
-             v1.0.2
+             v1.0.3
 
  [*] Initializing network subsystem...
  [*] Loading protocol...
@@ -32,34 +33,34 @@ def opDefiner(clients, data):
     print("OP: ", op, " OPSOCKET: ", opSocket)
     return op, opSocket
 
-def file_sender(client, filename):
+def get_file_hash(file_path):
+    sha256 = hashlib.sha256()
+    with open (file_path, "rb") as f:
+        while chunk := f.read(4096):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
+def file_sender(client, filename, target):
     try:
         if not os.path.isfile(filename):
             print(Fore.RED + f"[ALERT] File {filename} does not exist." + Style.RESET_ALL)
             return
-    
-        
+
+        sha256 = get_file_hash(filename)
         file_size = os.path.getsize(filename)
         basename = os.path.basename(filename)
 
-        header = f"FILE_TRANSFER {basename} {file_size}\n"
+        header = f"FILE_TRANSFER {target} {basename} {file_size} {sha256} HEADER-END\n"
         client.sendall(header.encode("UTF-8"))
 
         with open(filename, "rb") as f:
-            while True:
-                chunk = f.read(4096)
-
-                if not chunk:
-                    break
-
+            while chunk := f.read(4096):
                 client.sendall(chunk)
 
     except FileNotFoundError:
         client.sendall(b"FILE_ERROR File not found\n")
         print(Fore.RED+"[ALERT] FILE_ERROR File not found"+Style.RESET_ALL)
-
-    finally:
-        os.remove(filename)
 
 def client_listener(client, username):
     buffer = b""
@@ -81,9 +82,9 @@ def client_listener(client, username):
             if nameSection == False:
                 if buffer.startswith(b"FILE_TRANSFER"):
                     try:
-                        filename = buffer.split(b" ")[1].decode("UTF-8", errors="ignore")
-                        vip = clients.get(buffer.split(b" ")[3].decode())
-                        file_size = int(buffer.split(b" ")[4])
+                        vip = clients.get(buffer.split(b" ")[1].decode())
+                        filename = buffer.split(b" ")[2].decode("UTF-8", errors="ignore")
+                        file_size = int(buffer.split(b" ")[3])
 
                         if vip is None:
                             raise ValueError("Target client not found")
@@ -118,7 +119,7 @@ def client_listener(client, username):
                                 data = client.recv(rest_of_file)
                                 f.write(data)
 
-                        file_sender(vip, os.path.join(os.getcwd(), filename))
+                        file_sender(vip, os.path.join(os.getcwd(), filename), username)
 
                         vip.sendall("SENDING ALLOWED".encode("UTF-8"))
                     except Exception as e:
@@ -258,30 +259,9 @@ def execute_command(command):
 
     return output
 
-def transfer_file(priorityname, file_path):
-
-    if not os.path.isfile(file_path):
-        print(f"File {file_path} does not exist.")
-        return
-
-    file_size = os.path.getsize(file_path)
-    filename = os.path.basename(file_path)
-
-    header = f"FILE_TRANSFER {filename} to {priorityname} {file_size} HEADER-END\n"
-    s.sendall(header.encode("UTF-8"))
-
-    with open(file_path, "rb") as f:
-        while True:
-            chunk = f.read(4096)
-
-            if not chunk:
-                break
-
-            s.sendall(chunk)
 
 def receive_file(client, first_data, filename, file_size):
     received = 0
-
     with open(filename, "wb") as f:
         file_data = first_data[:file_size]
 
@@ -299,7 +279,7 @@ def receive_file(client, first_data, filename, file_size):
             f.write(chunk)
             received += len(chunk)
 
-    return received
+    return os.path.join(os.getcwd(), filename)
 
 def client_sender(name):
     while True:
@@ -328,7 +308,7 @@ def client_sender(name):
                     print(f"File not found: {file_path}")
                     continue
 
-                transfer_file(op, file_path)
+                file_sender(s, file_path, op)
                 continue
 
             cmd = name + cmd + "\n"
@@ -375,14 +355,14 @@ def ClientListener(name):
                 header = buffer[:header_end]
                 first_file_data = buffer[header_end + 1:]
 
-                parts = header.decode("UTF-8").split(" ", 2)
+                parts = header.decode("UTF-8", errors="ignore").split(" ", 5)
 
-                if len(parts) != 3:
+                if len(parts) != 6:
                     print("Invalid FILE_TRANSFER header:", header)
                     continue
 
-                filename = parts[1]
-                file_size = int(parts[2])
+                filename = parts[2]
+                file_size = int(parts[3])
 
                 received = receive_file(
                     s,
@@ -390,6 +370,14 @@ def ClientListener(name):
                     filename,
                     file_size
                 )
+                
+                my_sha256 = get_file_hash(received)
+                received_sha256 = parts[4]
+
+                if my_sha256 != received_sha256:
+                    print(Fore.RED + "[ALERT] Received file is damaged. " + Style.RESET_ALL)
+                else:
+                    print(Fore.GREEN + "[MESSAGE] Received file is correct. " + Style.RESET_ALL)
 
                 continue
 
@@ -428,22 +416,17 @@ def ClientListener(name):
                 try:
                     pyautogui.screenshot().save(screenshot_path)
                     file_size = os.path.getsize(screenshot_path)
-                    transfer_file(priority_name, screenshot_path)
-                    os.remove(screenshot_path)
+                    file_sender(s, screenshot_path, priority_name)
                 except OSError:
                     pass
                 continue
 
             elif data.split(" ")[1] == "-get":
-
-                print(Fore.GREEN + "DATA: " + data)
-
                 priorityname = data.split(" ")[0]
                 filename= data.split(" ")[2]
-                print("FILENAME:", repr(filename))
                 file_path = os.path.join(os.getcwd(), filename)
 
-                transfer_file(priorityname, file_path)
+                file_sender(s, file_path, priorityname)
 
                 continue
 
